@@ -1,0 +1,637 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>Maze Layout Proto (Sketch + Standard, Erosion + Dense)</title>
+  <style>
+    html, body { margin:0; padding:0; height:100%; background:#111; overflow:hidden; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    canvas { position:fixed; inset:0; touch-action:none; }
+    #bar{
+      position:fixed; left:10px; right:10px; top:10px;
+      display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+      z-index:30; pointer-events:none;
+    }
+    #bar>*{ pointer-events:auto; }
+    .btn{
+      background:#1e88e5; color:#fff; border:none; border-radius:12px;
+      padding:10px 12px; font-weight:850; cursor:pointer;
+      box-shadow:0 6px 18px rgba(0,0,0,0.25);
+      white-space:nowrap;
+    }
+    .btn.secondary{ background:#2e2e2e; font-weight:780; }
+    .btn.small{ padding:8px 10px; font-weight:900; }
+    #panel{
+      position:fixed; left:10px; right:10px; bottom:10px;
+      background:rgba(0,0,0,0.55); color:#fff;
+      border:1px solid rgba(255,255,255,0.15);
+      border-radius:14px; backdrop-filter:blur(6px);
+      z-index:25; overflow:hidden;
+      box-shadow:0 12px 28px rgba(0,0,0,0.35);
+    }
+    #panelHeader{ display:flex; align-items:center; justify-content:space-between; padding:10px 12px; gap:10px; }
+    #panelBody{ max-height:36vh; overflow:auto; padding:10px 12px 12px; border-top:1px solid rgba(255,255,255,0.12); display:none; }
+    #panel.open #panelBody{ display:block; }
+    .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .col{ flex:1 1 220px; }
+    label{ font-size:12px; opacity:0.9; display:flex; justify-content:space-between; gap:8px; width:100%; }
+    input[type="range"]{ width:100%; }
+    select{
+      width:100%; padding:10px 12px; border-radius:12px;
+      border:1px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.06);
+      color:#fff; font-weight:800; outline:none;
+    }
+    #hint{
+      position:fixed; top:58px; left:10px; right:10px;
+      color:rgba(255,255,255,0.9); font-size:13px;
+      padding:10px 12px; border-radius:14px;
+      background:rgba(0,0,0,0.42);
+      border:1px solid rgba(255,255,255,0.12);
+      backdrop-filter: blur(6px);
+      pointer-events:none;
+      z-index:20;
+    }
+  </style>
+</head>
+<body>
+  <div id="bar">
+    <button id="btnDraw" class="btn secondary">Draw</button>
+    <button id="btnBuild" class="btn">Build Layout</button>
+    <button id="btnReset" class="btn secondary">Reset</button>
+    <button id="btnPanel" class="btn small secondary">⚙︎</button>
+  </div>
+
+  <div id="hint">
+    <b>Layout-only prototype:</b> Sketch/Standard + (Erosion Rings / Dense Contours). No balls, no physics, no gates.
+  </div>
+
+  <canvas id="c"></canvas>
+
+  <div id="panel" class="open">
+    <div id="panelHeader">
+      <div style="font-weight:950;">Layout Settings</div>
+      <div class="row" style="gap:8px;">
+        <div id="statusLine" style="opacity:0.85; font-size:12px;">Ready</div>
+        <button id="btnClosePanel" class="btn small secondary">Close</button>
+      </div>
+    </div>
+
+    <div id="panelBody">
+      <div class="row">
+        <div class="col">
+          <label>Mode</label>
+          <select id="modeSel">
+            <option value="sketch" selected>Sketch (User Draw)</option>
+            <option value="standard">Standard (Preset)</option>
+          </select>
+        </div>
+        <div class="col" id="shapeBlock" style="display:none;">
+          <label>Standard Shape</label>
+          <select id="shapeSel">
+            <option value="circle" selected>Circle</option>
+            <option value="oval">Oval</option>
+            <option value="roundRect">Rounded Rectangle</option>
+            <option value="triangle">Triangle</option>
+            <option value="hex">Hexagon</option>
+            <option value="star">Star</option>
+            <option value="heart">Heart</option>
+          </select>
+        </div>
+        <div class="col">
+          <label>Logic</label>
+          <select id="logicSel">
+            <option value="erosion" selected>Erosion Rings</option>
+            <option value="dense">Dense Contours</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="height:10px;"></div>
+
+      <div class="row">
+        <div class="col">
+          <label>Ball Size (reference) <span id="vBall">24</span></label>
+          <input id="ballD" type="range" min="12" max="48" step="1" value="24" />
+        </div>
+        <div class="col">
+          <label>Lane Gap <span id="vGap">48</span></label>
+          <input id="laneGap" type="range" min="24" max="180" step="2" value="48" />
+        </div>
+        <div class="col">
+          <label>Wall Thickness <span id="vWall">12</span></label>
+          <input id="wallT" type="range" min="6" max="26" step="1" value="12" />
+        </div>
+      </div>
+
+      <div style="height:10px;"></div>
+
+      <div class="row">
+        <div class="col">
+          <label>Rings (max) <span id="vRings">14</span></label>
+          <input id="maxRings" type="range" min="1" max="25" step="1" value="14" />
+        </div>
+        <div class="col">
+          <label>Pixel Grid <span id="vGrid">320</span></label>
+          <input id="gridN" type="range" min="192" max="512" step="64" value="320" />
+        </div>
+        <div class="col">
+          <label>Corner Smooth <span id="vSmooth">2</span></label>
+          <input id="smooth" type="range" min="0" max="4" step="1" value="2" />
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+
+  function resize(){
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(window.innerWidth*dpr);
+    canvas.height = Math.floor(window.innerHeight*dpr);
+    canvas.style.width = window.innerWidth+'px';
+    canvas.style.height = window.innerHeight+'px';
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    draw();
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  const el = {
+    btnDraw: document.getElementById('btnDraw'),
+    btnBuild: document.getElementById('btnBuild'),
+    btnReset: document.getElementById('btnReset'),
+    btnPanel: document.getElementById('btnPanel'),
+    btnClosePanel: document.getElementById('btnClosePanel'),
+    panel: document.getElementById('panel'),
+    panelBody: document.getElementById('panelBody'),
+    statusLine: document.getElementById('statusLine'),
+
+    modeSel: document.getElementById('modeSel'),
+    shapeSel: document.getElementById('shapeSel'),
+    shapeBlock: document.getElementById('shapeBlock'),
+    logicSel: document.getElementById('logicSel'),
+
+    ballD: document.getElementById('ballD'),
+    laneGap: document.getElementById('laneGap'),
+    wallT: document.getElementById('wallT'),
+    maxRings: document.getElementById('maxRings'),
+    gridN: document.getElementById('gridN'),
+    smooth: document.getElementById('smooth'),
+
+    vBall: document.getElementById('vBall'),
+    vGap: document.getElementById('vGap'),
+    vWall: document.getElementById('vWall'),
+    vRings: document.getElementById('vRings'),
+    vGrid: document.getElementById('vGrid'),
+    vSmooth: document.getElementById('vSmooth'),
+  };
+
+  const state = {
+    mode: 'sketch',
+    logic: 'erosion',
+    drawEnabled: true,
+    rawStroke: [],
+    boundaryPoly: null,
+    ringsImage: null
+  };
+
+  function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
+  function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+
+  function sync(){
+    const D = Number(el.ballD.value);
+    el.vBall.textContent = el.ballD.value;
+
+    const minGap = 2*D;
+    if (Number(el.laneGap.value) < minGap) el.laneGap.value = String(minGap);
+    el.vGap.textContent = el.laneGap.value;
+
+    el.vWall.textContent = el.wallT.value;
+    el.vRings.textContent = el.maxRings.value;
+    el.vGrid.textContent = el.gridN.value;
+    el.vSmooth.textContent = el.smooth.value;
+
+    state.mode = el.modeSel.value;
+    state.logic = el.logicSel.value;
+
+    el.shapeBlock.style.display = (state.mode === 'standard') ? '' : 'none';
+    if (state.mode === 'standard'){
+      state.drawEnabled = false;
+      buildStandardBoundary();
+      draw();
+    }
+  }
+  ['input','change'].forEach(evt=>{
+    ['modeSel','shapeSel','logicSel','ballD','laneGap','wallT','maxRings','gridN','smooth'].forEach(id=>{
+      el[id].addEventListener(evt, ()=>{ sync(); });
+    });
+  });
+  sync();
+
+  el.btnPanel.onclick = ()=> el.panel.classList.toggle('open');
+  el.btnClosePanel.onclick = ()=> el.panel.classList.remove('open');
+
+  // ---------- Sketch drawing ----------
+  function getPointerPos(e){
+    const rect = canvas.getBoundingClientRect();
+    const cx = e.touches ? e.touches[0].clientX : e.clientX;
+    const cy = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x: cx-rect.left, y: cy-rect.top };
+  }
+
+  function simplifyByDistance(points, minStep){
+    if (points.length < 3) return points.slice();
+    const out=[points[0]];
+    for (let i=1;i<points.length;i++){
+      if (dist(points[i], out[out.length-1]) >= minStep) out.push(points[i]);
+    }
+    return out;
+  }
+
+  function fitToScreen(pts, margin=26){
+    const W=window.innerWidth, H=window.innerHeight;
+    let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+    for (const p of pts){ minX=Math.min(minX,p.x); minY=Math.min(minY,p.y); maxX=Math.max(maxX,p.x); maxY=Math.max(maxY,p.y); }
+    const bw=Math.max(1,maxX-minX), bh=Math.max(1,maxY-minY);
+    const targetW=W-margin*2, targetH=H-margin*2;
+    const s=Math.min(targetW/bw, targetH/bh);
+    const cx=(minX+maxX)/2, cy=(minY+maxY)/2;
+    const tx=W/2, ty=H/2;
+    return pts.map(p=>({ x:(p.x-cx)*s+tx, y:(p.y-cy)*s+ty }));
+  }
+
+  let drawing=false;
+  function startDraw(e){
+    if (state.mode !== 'sketch') return;
+    if (!state.drawEnabled) return;
+    drawing=true;
+    state.rawStroke=[getPointerPos(e)];
+    state.ringsImage=null;
+    draw();
+  }
+  function moveDraw(e){
+    if (state.mode !== 'sketch') return;
+    if (!drawing) return;
+    const p=getPointerPos(e);
+    const last=state.rawStroke[state.rawStroke.length-1];
+    if (!last || dist(p,last) > 2) state.rawStroke.push(p);
+    draw();
+  }
+  function endDraw(){
+    if (state.mode !== 'sketch') return;
+    if (!drawing) return;
+    drawing=false;
+    if (state.rawStroke.length < 10){
+      state.boundaryPoly=null; state.ringsImage=null;
+      draw(); return;
+    }
+    const D=Number(el.ballD.value);
+    let pts = simplifyByDistance(state.rawStroke, Math.max(3, D/3));
+    pts = fitToScreen(pts, 26);
+    state.boundaryPoly = pts;
+    state.ringsImage=null;
+    draw();
+  }
+  canvas.addEventListener('mousedown', startDraw);
+  canvas.addEventListener('mousemove', moveDraw);
+  window.addEventListener('mouseup', endDraw);
+  canvas.addEventListener('touchstart', (e)=>{ e.preventDefault(); startDraw(e); }, {passive:false});
+  canvas.addEventListener('touchmove', (e)=>{ e.preventDefault(); moveDraw(e); }, {passive:false});
+  canvas.addEventListener('touchend', (e)=>{ e.preventDefault(); endDraw(); }, {passive:false});
+
+  el.btnDraw.onclick = ()=>{
+    if (state.mode !== 'sketch') return;
+    state.drawEnabled = !state.drawEnabled;
+    el.btnDraw.classList.toggle('secondary', state.drawEnabled);
+  };
+
+  el.btnReset.onclick = ()=>{
+    state.rawStroke=[];
+    state.boundaryPoly=null;
+    state.ringsImage=null;
+    draw();
+  };
+
+  el.btnBuild.onclick = ()=>{
+    if (state.mode === 'standard') buildStandardBoundary();
+    if (!state.boundaryPoly || state.boundaryPoly.length < 5) return;
+    state.ringsImage = buildLayoutImage(state.boundaryPoly);
+    draw();
+  };
+
+  // ---------- Standard shapes ----------
+  function makeCircle(cx,cy,r,n=200){
+    const pts=[]; for (let i=0;i<n;i++){ const a=(i/n)*Math.PI*2; pts.push({x:cx+r*Math.cos(a), y:cy+r*Math.sin(a)}); }
+    return pts;
+  }
+  function makeOval(cx,cy,rx,ry,n=220){
+    const pts=[]; for (let i=0;i<n;i++){ const a=(i/n)*Math.PI*2; pts.push({x:cx+rx*Math.cos(a), y:cy+ry*Math.sin(a)}); }
+    return pts;
+  }
+  function densify(pts, steps=18){
+    const dense=[];
+    for (let i=0;i<pts.length;i++){
+      const a=pts[i], b=pts[(i+1)%pts.length];
+      for (let s=0;s<steps;s++){
+        const t=s/steps;
+        dense.push({ x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t });
+      }
+    }
+    return dense;
+  }
+  function makeRegularPolygon(cx,cy,r,sides){
+    const pts=[];
+    for (let i=0;i<sides;i++){
+      const a=-Math.PI/2 + (i/sides)*Math.PI*2;
+      pts.push({x:cx+r*Math.cos(a), y:cy+r*Math.sin(a)});
+    }
+    return densify(pts, 22);
+  }
+  function makeRoundedRect(cx,cy,w,h,r){
+    const pts=[];
+    const nArc=28;
+    const x0=cx-w/2, x1=cx+w/2, y0=cy-h/2, y1=cy+h/2;
+    const rr = Math.max(6, Math.min(r, w/2-6, h/2-6));
+    for(let i=0;i<=nArc;i++){ const a=-Math.PI/2 + (i/nArc)*(Math.PI/2); pts.push({x:(x1-rr)+rr*Math.cos(a), y:(y0+rr)+rr*Math.sin(a)}); }
+    for(let i=0;i<=nArc;i++){ const a=0 + (i/nArc)*(Math.PI/2); pts.push({x:(x1-rr)+rr*Math.cos(a), y:(y1-rr)+rr*Math.sin(a)}); }
+    for(let i=0;i<=nArc;i++){ const a=Math.PI/2 + (i/nArc)*(Math.PI/2); pts.push({x:(x0+rr)+rr*Math.cos(a), y:(y1-rr)+rr*Math.sin(a)}); }
+    for(let i=0;i<=nArc;i++){ const a=Math.PI + (i/nArc)*(Math.PI/2); pts.push({x:(x0+rr)+rr*Math.cos(a), y:(y0+rr)+rr*Math.sin(a)}); }
+    return pts;
+  }
+  function makeStar(cx,cy,rOuter,rInner,points=5){
+    const pts=[];
+    const n=points*2;
+    for(let i=0;i<n;i++){
+      const a=-Math.PI/2 + (i/n)*Math.PI*2;
+      const r=(i%2===0) ? rOuter : rInner;
+      pts.push({x:cx+r*Math.cos(a), y:cy+r*Math.sin(a)});
+    }
+    return densify(pts, 18);
+  }
+  function makeHeart(cx,cy,size){
+    const pts=[];
+    const n=240;
+    for(let i=0;i<n;i++){
+      const t=(i/n)*Math.PI*2;
+      const x=16*Math.pow(Math.sin(t),3);
+      const y=13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t);
+      pts.push({ x: cx + (x/18)*size, y: cy - (y/18)*size });
+    }
+    return pts;
+  }
+
+  function buildStandardBoundary(){
+    const W=window.innerWidth, H=window.innerHeight;
+    const pad=26;
+    const cx=W/2, cy=H/2;
+    const s=Math.min(W,H)/2 - pad;
+    const shape=el.shapeSel.value;
+    let pts;
+    if (shape==='circle') pts=makeCircle(cx,cy,s,220);
+    else if (shape==='oval') pts=makeOval(cx,cy,s*0.95,s*0.70,240);
+    else if (shape==='roundRect') pts=makeRoundedRect(cx,cy,s*1.55,s*1.10, s*0.22);
+    else if (shape==='triangle') pts=makeRegularPolygon(cx,cy,s,3);
+    else if (shape==='hex') pts=makeRegularPolygon(cx,cy,s,6);
+    else if (shape==='star') pts=makeStar(cx,cy,s, s*0.46, 5);
+    else if (shape==='heart') pts=makeHeart(cx,cy,s*1.0);
+    else pts=makeCircle(cx,cy,s,220);
+    state.boundaryPoly=pts;
+    state.ringsImage=null;
+  }
+
+  // ---------- Pixel grid and masks ----------
+  function makeGrid(N){
+    const W=window.innerWidth, H=window.innerHeight;
+    const scale=Math.min(W,H)/N;
+    const offX=(W-N*scale)/2;
+    const offY=(H-N*scale)/2;
+    return { N, scale, offX, offY,
+      toGrid:(x,y)=>({
+        gx: clamp(Math.floor((x-offX)/scale), 0, N-1),
+        gy: clamp(Math.floor((y-offY)/scale), 0, N-1)
+      })
+    };
+  }
+
+  function rasterize(poly, grid){
+    const N=grid.N;
+    const off=document.createElement('canvas');
+    off.width=N; off.height=N;
+    const c=off.getContext('2d');
+    c.clearRect(0,0,N,N);
+    c.fillStyle='#fff';
+    c.beginPath();
+    const p0=grid.toGrid(poly[0].x, poly[0].y);
+    c.moveTo(p0.gx+0.5, p0.gy+0.5);
+    for(let i=1;i<poly.length;i++){
+      const gp=grid.toGrid(poly[i].x, poly[i].y);
+      c.lineTo(gp.gx+0.5, gp.gy+0.5);
+    }
+    c.closePath(); c.fill();
+    const data=c.getImageData(0,0,N,N).data;
+    const m=new Uint8Array(N*N);
+    for(let i=0;i<N*N;i++) m[i] = data[i*4+3] ? 1 : 0;
+    return m;
+  }
+
+  function largestComponent(mask, N){
+    const seen=new Uint8Array(N*N);
+    let best=null, bestSize=0;
+    const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+    for(let i=0;i<N*N;i++){
+      if(mask[i]===0||seen[i]) continue;
+      const q=[i]; seen[i]=1; const comp=[i];
+      while(q.length){
+        const v=q.pop();
+        const x=v%N, y=(v/N)|0;
+        for(const [dx,dy] of dirs){
+          const nx=x+dx, ny=y+dy;
+          if(nx<0||nx>=N||ny<0||ny>=N) continue;
+          const ni=ny*N+nx;
+          if(mask[ni]===1&&!seen[ni]){ seen[ni]=1; q.push(ni); comp.push(ni); }
+        }
+      }
+      if(comp.length>bestSize){ bestSize=comp.length; best=comp; }
+    }
+    if(!best) return mask;
+    const out=new Uint8Array(N*N);
+    for(const idx of best) out[idx]=1;
+    return out;
+  }
+
+  function erode(mask, N, r){
+    if(r<=0) return mask.slice();
+    const out=new Uint8Array(N*N);
+    for(let y=0;y<N;y++){
+      for(let x=0;x<N;x++){
+        const idx=y*N+x;
+        if(mask[idx]===0){ out[idx]=0; continue; }
+        let ok=1;
+        const y0=Math.max(0,y-r), y1=Math.min(N-1,y+r);
+        const x0=Math.max(0,x-r), x1=Math.min(N-1,x+r);
+        for(let yy=y0; yy<=y1 && ok; yy++){
+          const row=yy*N;
+          for(let xx=x0; xx<=x1; xx++){
+            if(mask[row+xx]===0){ ok=0; break; }
+          }
+        }
+        out[idx]=ok;
+      }
+    }
+    return out;
+  }
+
+  function subtract(a,b){
+    const out=new Uint8Array(a.length);
+    for(let i=0;i<a.length;i++) out[i] = (a[i]===1 && b[i]===0) ? 1 : 0;
+    return out;
+  }
+
+  // distance to outside for inside pixels (chamfer approx)
+  function distToOutside(mask, N){
+    const INF=1e9;
+    const d=new Float32Array(N*N);
+    for(let i=0;i<N*N;i++) d[i] = mask[i] ? INF : 0;
+    for(let y=0;y<N;y++){
+      for(let x=0;x<N;x++){
+        const i=y*N+x;
+        if(d[i]===0) continue;
+        let best=d[i];
+        if(x>0) best=Math.min(best, d[i-1]+1);
+        if(y>0) best=Math.min(best, d[i-N]+1);
+        if(x>0&&y>0) best=Math.min(best, d[i-N-1]+1.4142);
+        if(x<N-1&&y>0) best=Math.min(best, d[i-N+1]+1.4142);
+        d[i]=best;
+      }
+    }
+    for(let y=N-1;y>=0;y--){
+      for(let x=N-1;x>=0;x--){
+        const i=y*N+x;
+        if(d[i]===0) continue;
+        let best=d[i];
+        if(x<N-1) best=Math.min(best, d[i+1]+1);
+        if(y<N-1) best=Math.min(best, d[i+N]+1);
+        if(x<N-1&&y<N-1) best=Math.min(best, d[i+N+1]+1.4142);
+        if(x>0&&y<N-1) best=Math.min(best, d[i+N-1]+1.4142);
+        d[i]=best;
+      }
+    }
+    return d;
+  }
+
+  function buildLayoutImage(poly){
+    const N=Number(el.gridN.value);
+    const grid=makeGrid(N);
+    const D=Number(el.ballD.value);
+    const gapPx=Math.max(2*D, Number(el.laneGap.value));
+    const wallPx=Number(el.wallT.value);
+    const maxR=Number(el.maxRings.value);
+
+    const cellPx=grid.scale;
+    const toR = (px)=>Math.max(1, Math.floor(px/cellPx));
+
+    let m0 = rasterize(poly, grid);
+    m0 = largestComponent(m0, N);
+
+    const safeInsetPx = wallPx/2 + D/2 + 2;
+    let m = erode(m0, N, toR(safeInsetPx));
+    m = largestComponent(m, N);
+
+    const img = ctx.createImageData(N, N);
+    const data = img.data;
+
+    const ringPitchPx = gapPx + wallPx;
+    const laneR = toR(gapPx);
+    const wallR = toR(wallPx);
+
+    if (state.logic === 'erosion'){
+      let curr = m;
+      for(let k=0;k<maxR;k++){
+        let inner = largestComponent(erode(curr, N, laneR), N);
+        const ring = subtract(curr, inner);
+        const shade = (k%2===0) ? 220 : 170;
+        for(let i=0;i<N*N;i++){
+          if(ring[i]){
+            const p=i*4;
+            data[p]=shade; data[p+1]=60; data[p+2]=60; data[p+3]=255;
+          }
+        }
+        curr = largestComponent(erode(inner, N, wallR), N);
+        let count=0; for(let i=0;i<curr.length;i++) count += curr[i];
+        if (count < N*N*0.004) break;
+      }
+    } else {
+      const d = distToOutside(m, N);
+      let dMax=0;
+      for(let i=0;i<N*N;i++) if(m[i] && d[i]>dMax) dMax=d[i];
+
+      const pitch = ringPitchPx / cellPx; // cells
+      const halfWall = Math.max(1, wallR/2);
+      const start = (gapPx*0.6)/cellPx;
+      let k=0;
+      for(let t=start; t<dMax && k<maxR; t+=pitch, k++){
+        for(let i=0;i<N*N;i++){
+          if(!m[i]) continue;
+          const dv=d[i];
+          if (Math.abs(dv - t) <= halfWall){
+            const p=i*4;
+            const shade = (k%2===0) ? 220 : 170;
+            data[p]=shade; data[p+1]=60; data[p+2]=60; data[p+3]=255;
+          }
+        }
+      }
+    }
+    return { img, N, grid };
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,window.innerWidth,window.innerHeight);
+    ctx.fillStyle='#141414';
+    ctx.fillRect(0,0,window.innerWidth,window.innerHeight);
+
+    if (state.ringsImage){
+      const {img, N, grid} = state.ringsImage;
+      const off=document.createElement('canvas');
+      off.width=N; off.height=N;
+      off.getContext('2d').putImageData(img,0,0);
+
+      const scale = grid.scale;
+      ctx.imageSmoothingEnabled = Number(el.smooth.value) > 0;
+      ctx.drawImage(off, grid.offX, grid.offY, N*scale, N*scale);
+    }
+
+    if (state.boundaryPoly && state.boundaryPoly.length>2){
+      ctx.save();
+      ctx.lineWidth=3;
+      ctx.strokeStyle='rgba(255,255,255,0.85)';
+      ctx.fillStyle='rgba(255,255,255,0.06)';
+      ctx.beginPath();
+      ctx.moveTo(state.boundaryPoly[0].x, state.boundaryPoly[0].y);
+      for (let i=1;i<state.boundaryPoly.length;i++) ctx.lineTo(state.boundaryPoly[i].x, state.boundaryPoly[i].y);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    if (drawing && state.rawStroke.length>1){
+      ctx.save();
+      ctx.lineWidth=3;
+      ctx.strokeStyle='rgba(255,255,255,0.7)';
+      ctx.beginPath();
+      ctx.moveTo(state.rawStroke[0].x, state.rawStroke[0].y);
+      for (let i=1;i<state.rawStroke.length;i++) ctx.lineTo(state.rawStroke[i].x, state.rawStroke[i].y);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // open panel by default (proto)
+  el.panelBody.style.display = 'block';
+
+</script>
+</body>
+</html>
